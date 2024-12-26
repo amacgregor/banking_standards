@@ -66,5 +66,4 @@ defmodule BankingStandards.ACH.BatchHeader do
       reversed_errors -> {:error, Enum.join(reversed_errors, ", ")}
     end
   end
-
 end

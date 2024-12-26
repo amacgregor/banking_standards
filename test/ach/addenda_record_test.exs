@@ -8,7 +8,7 @@ defmodule BankingStandards.ACH.AddendaRecordTest do
       addenda_type_code: "05",
       payment_related_information: "SUPPLEMENTAL DATA",
       addenda_sequence_number: 1,
-      entry_detail_sequence_number: 1000001
+      entry_detail_sequence_number: 1_000_001
     }
 
     assert AddendaRecord.validate(addenda) == :ok
@@ -20,7 +20,7 @@ defmodule BankingStandards.ACH.AddendaRecordTest do
       addenda_type_code: "05",
       payment_related_information: "SUPPLEMENTAL DATA",
       addenda_sequence_number: 1,
-      entry_detail_sequence_number: 1000001
+      entry_detail_sequence_number: 1_000_001
     }
 
     assert {:error, error} = AddendaRecord.validate(addenda)

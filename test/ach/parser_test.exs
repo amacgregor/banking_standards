@@ -24,15 +24,25 @@ defmodule BankingStandards.ACH.ParserTest do
     test "parses an ACH file with multiple records" do
       {:ok, result} = Parser.parse("lib/ach/examples/multi_batch.ach")
 
-      assert Enum.count(result, fn record -> record.__struct__ == BankingStandards.ACH.BatchHeader end) == 2
-      assert Enum.count(result, fn record -> record.__struct__ == BankingStandards.ACH.EntryDetail end) > 0
-      assert Enum.count(result, fn record -> record.__struct__ == BankingStandards.ACH.BatchTrailer end) == 2
+      assert Enum.count(result, fn record ->
+               record.__struct__ == BankingStandards.ACH.BatchHeader
+             end) == 2
+
+      assert Enum.count(result, fn record ->
+               record.__struct__ == BankingStandards.ACH.EntryDetail
+             end) > 0
+
+      assert Enum.count(result, fn record ->
+               record.__struct__ == BankingStandards.ACH.BatchTrailer
+             end) == 2
     end
 
     test "parses an ACH file with addenda records" do
       {:ok, result} = Parser.parse("lib/ach/examples/multi_batch.ach")
 
-      assert Enum.count(result, fn record -> record.__struct__ == BankingStandards.ACH.AddendaRecord end) > 0
+      assert Enum.count(result, fn record ->
+               record.__struct__ == BankingStandards.ACH.AddendaRecord
+             end) > 0
     end
 
     test "associates entry detail records with their addenda records" do
@@ -44,7 +54,9 @@ defmodule BankingStandards.ACH.ParserTest do
 
       # Filter Addenda Records
       addenda_records =
-        Enum.filter(result, fn record -> record.__struct__ == BankingStandards.ACH.AddendaRecord end)
+        Enum.filter(result, fn record ->
+          record.__struct__ == BankingStandards.ACH.AddendaRecord
+        end)
 
       assert length(entry_details) > 0
       assert length(addenda_records) > 0
@@ -63,8 +75,6 @@ defmodule BankingStandards.ACH.ParserTest do
                "Expected addenda for entry with trace number #{entry.trace_number}, but none found"
       end)
     end
-
-
 
     test "returns an error if the file does not exist" do
       assert_raise File.Error, fn ->

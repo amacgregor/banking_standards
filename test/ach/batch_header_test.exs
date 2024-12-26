@@ -33,6 +33,5 @@ defmodule BankingStandards.ACH.BatchHeaderTest do
       assert {:error, message} = BatchHeader.validate(header)
       assert message == "company_name is required, company_identification is required"
     end
-
   end
 end

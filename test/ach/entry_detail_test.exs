@@ -10,7 +10,7 @@ defmodule BankingStandards.ACH.EntryDetailTest do
         receiving_dfi_identification: "12345678",
         check_digit: "1",
         dfi_account_number: "987654321",
-        amount: 100000,
+        amount: 100_000,
         individual_identification_number: "ID123",
         individual_name: "DOE JOHN",
         discretionary_data: nil,
@@ -30,6 +30,7 @@ defmodule BankingStandards.ACH.EntryDetailTest do
       }
 
       assert {:error, message} = EntryDetail.validate(entry)
+
       assert message ==
                "transaction_code is required, receiving_dfi_identification is required, amount must be a positive integer"
     end
@@ -39,7 +40,7 @@ defmodule BankingStandards.ACH.EntryDetailTest do
         record_type_code: "7",
         transaction_code: "27",
         receiving_dfi_identification: "12345678",
-        amount: 100000
+        amount: 100_000
       }
 
       assert {:error, message} = EntryDetail.validate(entry)

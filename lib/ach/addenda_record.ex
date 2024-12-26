@@ -37,5 +37,4 @@ defmodule BankingStandards.ACH.AddendaRecord do
       _ -> {:error, Enum.join(errors, ", ")}
     end
   end
-
 end

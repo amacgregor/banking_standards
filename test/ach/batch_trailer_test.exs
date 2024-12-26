@@ -9,8 +9,8 @@ defmodule BankingStandards.ACH.BatchTrailerTest do
         service_class_code: "200",
         entry_addenda_count: 5,
         entry_hash: "123456789",
-        total_debit: 100000,
-        total_credit: 100000,
+        total_debit: 100_000,
+        total_credit: 100_000,
         company_identification: "987654321",
         originating_dfi_identification: "076401251",
         batch_number: "0000001"
@@ -33,8 +33,8 @@ defmodule BankingStandards.ACH.BatchTrailerTest do
     test "raises an error for an invalid record_type_code" do
       trailer = %BatchTrailer{
         record_type_code: "9",
-        total_debit: 100000,
-        total_credit: 100000
+        total_debit: 100_000,
+        total_credit: 100_000
       }
 
       assert {:error, message} = BatchTrailer.validate(trailer)

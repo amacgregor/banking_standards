@@ -8,9 +8,11 @@ defmodule BankingStandards.ACH.Parser do
   def parse(file_path) do
     File.stream!(file_path)
     |> Stream.with_index(1)
-    |> Enum.reduce_while({:ok, %{entries: [], addenda: [], result: []}}, fn {line, index}, {:ok, state} ->
+    |> Enum.reduce_while({:ok, %{entries: [], addenda: [], result: []}}, fn {line, index},
+                                                                            {:ok, state} ->
       case parse_line(line, index) do
-        {:ok, nil} -> {:cont, {:ok, state}} # Skip padding
+        # Skip padding
+        {:ok, nil} -> {:cont, {:ok, state}}
         {:ok, struct} -> {:cont, {:ok, %{state | result: [struct | state.result]}}}
         {:error, error} -> {:halt, {:error, error}}
       end
@@ -20,8 +22,6 @@ defmodule BankingStandards.ACH.Parser do
       error -> error
     end
   end
-
-
 
   @spec parse_line(String.t(), integer()) ::
           {:ok, BatchHeader.t() | EntryDetail.t() | BatchTrailer.t()} | {:error, String.t()}
@@ -50,7 +50,8 @@ defmodule BankingStandards.ACH.Parser do
       trace_number: String.slice(line, 87, 7) |> String.trim(),
       payment_related_information: String.slice(line, 3, 80) |> String.trim(),
       addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
-      entry_detail_sequence_number: String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
+      entry_detail_sequence_number:
+        String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
     }
     |> validate_struct(AddendaRecord)
   end
@@ -105,7 +106,6 @@ defmodule BankingStandards.ACH.Parser do
     |> validate_struct(BatchHeader)
   end
 
-
   defp parse_entry_detail(line, _index) do
     %EntryDetail{
       record_type_code: String.slice(line, 0, 1),
@@ -123,7 +123,6 @@ defmodule BankingStandards.ACH.Parser do
     |> validate_struct(EntryDetail)
   end
 
-
   defp parse_batch_trailer(line, _index) do
     %BatchTrailer{
       record_type_code: String.slice(line, 0, 1),
@@ -138,7 +137,6 @@ defmodule BankingStandards.ACH.Parser do
     }
     |> validate_struct(BatchTrailer)
   end
-
 
   defp validate_struct(struct, module) do
     case module.validate(struct) do
