@@ -14,6 +14,7 @@ This library is designed to be the cornerstone of financial technology in Elixir
 - Planned support for:
   - CPA AFT (Canada)
   - ISO 20022 (International)
+  - EDI 820 (Electronic Payment Order)
 
 ## Common Standards
 

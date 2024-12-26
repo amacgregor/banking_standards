@@ -3,7 +3,7 @@ defmodule BankingStandards.ACH.Parser do
   Parses ACH files in NACHA format and maps them to validated structs.
   """
 
-  alias BankingStandards.ACH.{BatchHeader, EntryDetail, BatchTrailer, FileHeader}
+  alias BankingStandards.ACH.{BatchHeader, EntryDetail, BatchTrailer, FileHeader, AddendaRecord}
 
   @spec parse(String.t()) :: {:ok, [BatchHeader.t() | EntryDetail.t() | BatchTrailer.t()]} | {:error, String.t()}
   def parse(file_path) do
@@ -11,6 +11,7 @@ defmodule BankingStandards.ACH.Parser do
     |> Stream.with_index(1)
     |> Enum.reduce_while({:ok, []}, fn {line, index}, {:ok, acc} ->
       case parse_line(line, index) do
+        {:ok, nil} -> {:cont, {:ok, acc}} # Skip padding
         {:ok, struct} -> {:cont, {:ok, [struct | acc]}}
         {:error, error} -> {:halt, {:error, error}}
       end
@@ -26,19 +27,33 @@ defmodule BankingStandards.ACH.Parser do
   defp parse_line(line, index) do
 
     # Validate line length
-    if String.length(line) != 94 do
+    if String.length(line) != 95 do
       {:error, "Line length error on line #{index}"}
     else
-      case String.at(line, 0) do
-        "1" -> parse_file_header(line, index)
-        "5" -> parse_batch_header(line, index)
-        "6" -> parse_entry_detail(line, index)
-        "8" -> parse_batch_trailer(line, index)
-        "9" -> parse_file_control(line, index)
-        _ -> {:error, "Invalid record type '#{String.at(line, 0)}' on line #{index}"}
+      case String.slice(line, 0, 3) do
+        "101" -> parse_file_header(line, index)
+        "5" <> _ -> parse_batch_header(line, index)
+        "6" <> _ -> parse_entry_detail(line, index)
+        "7" <> _ -> parse_addenda_record(line, index)
+        "8" <> _ -> parse_batch_trailer(line, index)
+        "900" -> parse_file_control(line, index)
+        "999" -> {:ok, nil}
+        _ -> {:error, "Invalid record type '#{String.slice(line, 0, 3)}' on line #{index}"}
       end
     end
   end
+
+  defp parse_addenda_record(line, _index) do
+    %BankingStandards.ACH.AddendaRecord{
+      record_type_code: String.slice(line, 0, 1),
+      addenda_type_code: String.slice(line, 1, 2),
+      payment_related_information: String.slice(line, 3, 80) |> String.trim(),
+      addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
+      entry_detail_sequence_number: String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
+    }
+    |> validate_struct(BankingStandards.ACH.AddendaRecord)
+  end
+
 
   defp parse_file_header(line, _index) do
     %FileHeader{

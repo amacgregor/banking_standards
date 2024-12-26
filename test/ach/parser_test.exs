@@ -18,7 +18,7 @@ defmodule BankingStandards.ACH.ParserTest do
 
     test "detects invalid record type" do
       {:error, error} = Parser.parse("lib/ach/examples/invalid_record_type.ach")
-      assert error == "Invalid record type '9' on line 3"
+      assert error == "Invalid record type '901' on line 3"
     end
 
     test "parses an ACH file with multiple records" do
