@@ -24,3 +24,5 @@ banking_standards-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+nohup.out
