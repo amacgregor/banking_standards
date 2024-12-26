@@ -48,7 +48,7 @@ defmodule BankingStandards.MixProject do
     _git_version = String.trim(description)
                     |> String.split("-")
                     |> Enum.take(2)
-                    |> Enum.join(".")
+                    |> Enum.join("-")
                     |> String.replace_leading("v", "")
   end
 end
