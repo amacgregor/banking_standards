@@ -5,6 +5,7 @@ defmodule BankingStandards.ACH.Parser do
 
   alias BankingStandards.ACH.{BatchHeader, EntryDetail, BatchTrailer, FileHeader, AddendaRecord}
 
+  @spec parse(String.t()) :: {:ok, list(struct())} | {:error, String.t()}
   def parse(file_path) do
     File.stream!(file_path)
     |> Stream.with_index(1)
@@ -24,7 +25,9 @@ defmodule BankingStandards.ACH.Parser do
   end
 
   @spec parse_line(String.t(), integer()) ::
-          {:ok, BatchHeader.t() | EntryDetail.t() | BatchTrailer.t()} | {:error, String.t()}
+          {:ok, nil}
+          | {:ok, struct()}
+          | {:error, String.t()}
   defp parse_line(line, index) do
     # Validate line length
     if String.length(line) != 95 do
