@@ -5,27 +5,27 @@ defmodule BankingStandards.ACH.Parser do
 
   alias BankingStandards.ACH.{BatchHeader, EntryDetail, BatchTrailer, FileHeader, AddendaRecord}
 
-  @spec parse(String.t()) :: {:ok, [BatchHeader.t() | EntryDetail.t() | BatchTrailer.t()]} | {:error, String.t()}
   def parse(file_path) do
     File.stream!(file_path)
     |> Stream.with_index(1)
-    |> Enum.reduce_while({:ok, []}, fn {line, index}, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, %{entries: [], addenda: [], result: []}}, fn {line, index}, {:ok, state} ->
       case parse_line(line, index) do
-        {:ok, nil} -> {:cont, {:ok, acc}} # Skip padding
-        {:ok, struct} -> {:cont, {:ok, [struct | acc]}}
+        {:ok, nil} -> {:cont, {:ok, state}} # Skip padding
+        {:ok, struct} -> {:cont, {:ok, %{state | result: [struct | state.result]}}}
         {:error, error} -> {:halt, {:error, error}}
       end
     end)
     |> case do
-      {:ok, result} -> {:ok, Enum.reverse(result)}
+      {:ok, state} -> {:ok, Enum.reverse(state.result)}
       error -> error
     end
   end
 
+
+
   @spec parse_line(String.t(), integer()) ::
           {:ok, BatchHeader.t() | EntryDetail.t() | BatchTrailer.t()} | {:error, String.t()}
   defp parse_line(line, index) do
-
     # Validate line length
     if String.length(line) != 95 do
       {:error, "Line length error on line #{index}"}
@@ -44,16 +44,16 @@ defmodule BankingStandards.ACH.Parser do
   end
 
   defp parse_addenda_record(line, _index) do
-    %BankingStandards.ACH.AddendaRecord{
+    %AddendaRecord{
       record_type_code: String.slice(line, 0, 1),
       addenda_type_code: String.slice(line, 1, 2),
+      trace_number: String.slice(line, 87, 7) |> String.trim(),
       payment_related_information: String.slice(line, 3, 80) |> String.trim(),
       addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
       entry_detail_sequence_number: String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
     }
-    |> validate_struct(BankingStandards.ACH.AddendaRecord)
+    |> validate_struct(AddendaRecord)
   end
-
 
   defp parse_file_header(line, _index) do
     %FileHeader{
