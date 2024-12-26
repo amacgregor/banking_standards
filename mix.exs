@@ -4,7 +4,7 @@ defmodule BankingStandards.MixProject do
   def project do
     [
       app: :banking_standards,
-      version: "0.1.0",
+      version: app_version(),
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       description: description(),
@@ -28,9 +28,7 @@ defmodule BankingStandards.MixProject do
   end
 
   defp description do
-    """
-    Banking Standards
-    """
+    "Building the foundation for seamless financial transactions in Elixir."
   end
 
   defp package do
@@ -42,5 +40,15 @@ defmodule BankingStandards.MixProject do
         "GitHub" => "https://github.com/amacgregor/banking_standards"
       }
     ]
+  end
+
+  defp app_version do
+    # get git version
+    {description, 0} = System.cmd("git", ~w[describe]) # => returns something like: v1.0-231-g1c7ef8b
+    _git_version = String.trim(description)
+                    |> String.split("-")
+                    |> Enum.take(2)
+                    |> Enum.join(".")
+                    |> String.replace_leading("v", "")
   end
 end
