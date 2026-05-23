@@ -193,7 +193,7 @@ defmodule BankingStandards.ACH.ValidatorTest do
       individual_name: "DOE JOHN",
       discretionary_data: "",
       addenda_record_indicator: 0,
-      trace_number: "076401251" <> Keyword.fetch!(opts, :trace_seq)
+      trace_number: "07640125" <> Keyword.fetch!(opts, :trace_seq)
     }
   end
 

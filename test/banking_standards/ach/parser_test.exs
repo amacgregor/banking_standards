@@ -38,18 +38,37 @@ defmodule BankingStandards.ACH.ParserTest do
       assert error == "Invalid record type '901' on line 3"
     end
 
-    test "rejects records out of sequence" do
-      # multi_batch.ach has an entry detail + addenda orphaned after the second
-      # batch trailer with no new batch header. The hierarchical parser rejects
-      # this; a fixed multi_batch fixture is added in the generator commit.
-      {:error, error} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
-      assert error =~ "Expected batch header or file control, got entry detail"
+    test "parses a multi-batch file with consistent trailers and control" do
+      {:ok, %AchFile{batches: batches, control: control}} =
+        Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
+
+      assert length(batches) == 2
+      assert control.batch_count == 2
     end
 
     test "raises if the file does not exist" do
       assert_raise File.Error, fn ->
         Parser.parse("lib/banking_standards/ach/examples/nonexistent.ach")
       end
+    end
+  end
+
+  describe "parse_string/1" do
+    test "parses an in-memory ACH file string" do
+      content = File.read!("lib/banking_standards/ach/examples/valid.ach")
+      {:ok, %AchFile{}} = Parser.parse_string(content)
+    end
+
+    test "rejects an entry detail outside any batch" do
+      # File header, then an entry detail with no batch header in between.
+      lines = [
+        String.pad_trailing("101 076401251 1234567890260523120010094101DEST                   ORIG", 94),
+        String.pad_trailing("6220110000159876543210000010000               DOE JOHN              0076401250000001", 94)
+      ]
+
+      content = Enum.join(lines, "\n") <> "\n"
+      assert {:error, error} = Parser.parse_string(content)
+      assert error =~ "Expected batch header or file control, got entry detail"
     end
   end
 end

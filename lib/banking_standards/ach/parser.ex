@@ -29,8 +29,19 @@ defmodule BankingStandards.ACH.Parser do
   def parse(file_path) do
     file_path
     |> File.stream!()
-    |> tokenize()
-    |> case do
+    |> do_parse()
+  end
+
+  @spec parse_string(String.t()) :: {:ok, AchFile.t()} | {:error, String.t()}
+  def parse_string(content) when is_binary(content) do
+    content
+    |> String.split("\n", trim: true)
+    |> Stream.map(&(&1 <> "\n"))
+    |> do_parse()
+  end
+
+  defp do_parse(line_stream) do
+    case tokenize(line_stream) do
       {:ok, records} -> assemble(records)
       {:error, _} = error -> error
     end
@@ -292,8 +303,8 @@ defmodule BankingStandards.ACH.Parser do
       total_debit: String.slice(line, 20, 12) |> String.trim() |> String.to_integer(),
       total_credit: String.slice(line, 32, 12) |> String.trim() |> String.to_integer(),
       company_identification: String.slice(line, 44, 10) |> String.trim(),
-      originating_dfi_identification: String.slice(line, 54, 8) |> String.trim(),
-      batch_number: String.slice(line, 62, 7) |> String.trim()
+      originating_dfi_identification: String.slice(line, 79, 8) |> String.trim(),
+      batch_number: String.slice(line, 87, 7) |> String.trim()
     }
   end
 
