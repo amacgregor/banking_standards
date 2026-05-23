@@ -4,7 +4,7 @@ defmodule BankingStandards.ACH.ParserTest do
 
   describe "parse/1" do
     test "parses a valid ACH file" do
-      {:ok, result} = Parser.parse("lib/ach/examples/valid.ach")
+      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/valid.ach")
 
       assert result != []
       assert Enum.at(result, 0).__struct__ == BankingStandards.ACH.FileHeader
@@ -12,17 +12,17 @@ defmodule BankingStandards.ACH.ParserTest do
     end
 
     test "handles line length error" do
-      {:error, error} = Parser.parse("lib/ach/examples/invalid_line_length.ach")
+      {:error, error} = Parser.parse("lib/banking_standards/ach/examples/invalid_line_length.ach")
       assert error == "Line length error on line 4"
     end
 
     test "detects invalid record type" do
-      {:error, error} = Parser.parse("lib/ach/examples/invalid_record_type.ach")
+      {:error, error} = Parser.parse("lib/banking_standards/ach/examples/invalid_record_type.ach")
       assert error == "Invalid record type '901' on line 3"
     end
 
     test "parses an ACH file with multiple records" do
-      {:ok, result} = Parser.parse("lib/ach/examples/multi_batch.ach")
+      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
 
       assert Enum.count(result, fn record ->
                record.__struct__ == BankingStandards.ACH.BatchHeader
@@ -38,7 +38,7 @@ defmodule BankingStandards.ACH.ParserTest do
     end
 
     test "parses an ACH file with addenda records" do
-      {:ok, result} = Parser.parse("lib/ach/examples/multi_batch.ach")
+      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
 
       assert Enum.any?(result, fn record ->
                record.__struct__ == BankingStandards.ACH.AddendaRecord
@@ -46,7 +46,7 @@ defmodule BankingStandards.ACH.ParserTest do
     end
 
     test "associates entry detail records with their addenda records" do
-      {:ok, result} = Parser.parse("lib/ach/examples/entry_addenda.ach")
+      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/entry_addenda.ach")
 
       # Filter Entry Detail Records
       entry_details =
@@ -78,7 +78,7 @@ defmodule BankingStandards.ACH.ParserTest do
 
     test "returns an error if the file does not exist" do
       assert_raise File.Error, fn ->
-        Parser.parse("lib/ach/examples/nonexistent.ach")
+        Parser.parse("lib/banking_standards/ach/examples/nonexistent.ach")
       end
     end
   end
