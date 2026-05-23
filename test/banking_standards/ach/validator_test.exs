@@ -105,6 +105,73 @@ defmodule BankingStandards.ACH.ValidatorTest do
       assert {:error, errors} = Validator.validate(file)
       assert Enum.any?(errors, &String.contains?(&1, "Invalid ABA check digit"))
     end
+
+    test "rejects an unknown transaction code" do
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [
+            %{
+              b
+              | entries:
+                  Enum.map(b.entries, fn {entry, addenda} ->
+                    {%{entry | transaction_code: "99"}, addenda}
+                  end)
+            }
+          ]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown transaction code "99")))
+    end
+
+    test "rejects a prenote entry with non-zero amount" do
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [
+            %{
+              b
+              | entries:
+                  Enum.map(b.entries, fn {entry, addenda} ->
+                    # Code 23 is a checking-credit prenote — amount must be 0.
+                    {%{entry | transaction_code: "23"}, addenda}
+                  end)
+            }
+          ]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, "Prenotification entry"))
+      assert Enum.any?(errors, &String.contains?(&1, "must have amount 0"))
+    end
+
+    test "accepts a prenote entry with zero amount" do
+      # Build a single-batch file where both entries are zero-dollar prenotes.
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          updated_entries =
+            Enum.map(b.entries, fn {entry, addenda} ->
+              {%{entry | transaction_code: "23", amount: 0}, addenda}
+            end)
+
+          [
+            %{
+              b
+              | entries: updated_entries,
+                trailer: %{b.trailer | total_credit: 0, total_debit: 0}
+            }
+          ]
+        end)
+
+      file = %{file | control: %{file.control | total_credit: 0, total_debit: 0}}
+
+      assert Validator.validate(file) == :ok
+    end
   end
 
   # Builds a minimal, internally consistent AchFile:

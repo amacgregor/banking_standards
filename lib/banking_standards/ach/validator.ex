@@ -16,6 +16,7 @@ defmodule BankingStandards.ACH.Validator do
   def validate(%AchFile{} = file) do
     errors =
       validate_routing_numbers(file) ++
+        validate_transaction_codes(file) ++
         validate_batch_trailers(file) ++
         validate_file_control(file)
 
@@ -65,6 +66,33 @@ defmodule BankingStandards.ACH.Validator do
         ["Invalid ABA check digit for routing number #{rdfi_with_check}"]
       end
     end)
+  end
+
+  defp validate_transaction_codes(%AchFile{batches: batches}) do
+    batches
+    |> Enum.flat_map(fn %Batch{entries: entries} -> entries end)
+    |> Enum.flat_map(fn {%EntryDetail{} = entry, _addenda} ->
+      validate_transaction_code(entry)
+    end)
+  end
+
+  defp validate_transaction_code(%EntryDetail{
+         transaction_code: code,
+         amount: amount,
+         trace_number: trace
+       }) do
+    cond do
+      not TransactionCode.valid?(code) ->
+        ["Unknown transaction code #{inspect(code)} on entry #{trace}"]
+
+      TransactionCode.prenote?(code) and amount != 0 ->
+        [
+          "Prenotification entry #{trace} (transaction code #{code}) must have amount 0, got #{amount}"
+        ]
+
+      true ->
+        []
+    end
   end
 
   defp validate_batch_trailers(%AchFile{batches: batches}) do
