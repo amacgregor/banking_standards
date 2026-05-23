@@ -197,6 +197,95 @@ defmodule BankingStandards.ACH.ValidatorTest do
       assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown return reason code "R99")))
     end
 
+    test "rejects an unknown SEC code on the batch header" do
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [%{b | header: %{b.header | standard_entry_class_code: "XYZ"}}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown SEC code "XYZ")))
+    end
+
+    test "rejects a transaction code not permitted for the SEC" do
+      # PPD is consumer checking/savings; code 55 is a loan debit, not allowed.
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          updated_entries =
+            Enum.map(b.entries, fn {entry, addenda} ->
+              {%{entry | transaction_code: "55"}, addenda}
+            end)
+
+          [%{b | entries: updated_entries}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+
+      assert Enum.any?(
+               errors,
+               &String.contains?(&1, "Transaction code 55 is not permitted for SEC PPD")
+             )
+    end
+
+    test "rejects too many addenda for SEC PPD (max 1)" do
+      file = valid_file()
+
+      addenda = fn seq ->
+        %BankingStandards.ACH.Addenda05{
+          record_type_code: "7",
+          addenda_type_code: "05",
+          payment_related_information: "INFO",
+          addenda_sequence_number: seq,
+          entry_detail_sequence_number: 1
+        }
+      end
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+          updated_first = {%{entry | addenda_record_indicator: 1}, [addenda.(1), addenda.(2)]}
+          [%{b | entries: [updated_first | rest]}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, "SEC PPD permits at most 1 addenda"))
+    end
+
+    test "rejects any addenda for SEC ARC" do
+      file = valid_file()
+
+      addenda = %BankingStandards.ACH.Addenda05{
+        record_type_code: "7",
+        addenda_type_code: "05",
+        payment_related_information: "INFO",
+        addenda_sequence_number: 1,
+        entry_detail_sequence_number: 1
+      }
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+
+          updated_first =
+            {%{entry | transaction_code: "27", addenda_record_indicator: 1}, [addenda]}
+
+          updated_batch = %{
+            b
+            | header: %{b.header | standard_entry_class_code: "ARC"},
+              entries: [updated_first | rest]
+          }
+
+          [updated_batch]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, "SEC ARC permits at most 0 addenda"))
+    end
+
     test "accepts a prenote entry with zero amount" do
       # Build a single-batch file where both entries are zero-dollar prenotes.
       file = valid_file()
