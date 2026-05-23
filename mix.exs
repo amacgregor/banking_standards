@@ -26,7 +26,8 @@ defmodule BankingStandards.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
-      {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false}
+      {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.1", only: [:dev, :test]}
     ]
   end
 
