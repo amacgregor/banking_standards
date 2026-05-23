@@ -28,3 +28,4 @@ banking_standards-*.tar
 nohup.out
 
 CLAUDE.local.md
+.claude/scheduled_tasks.lock

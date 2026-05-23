@@ -105,6 +105,122 @@ defmodule BankingStandards.ACH.ValidatorTest do
       assert {:error, errors} = Validator.validate(file)
       assert Enum.any?(errors, &String.contains?(&1, "Invalid ABA check digit"))
     end
+
+    test "rejects an unknown transaction code" do
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [
+            %{
+              b
+              | entries:
+                  Enum.map(b.entries, fn {entry, addenda} ->
+                    {%{entry | transaction_code: "99"}, addenda}
+                  end)
+            }
+          ]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown transaction code "99")))
+    end
+
+    test "rejects a prenote entry with non-zero amount" do
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [
+            %{
+              b
+              | entries:
+                  Enum.map(b.entries, fn {entry, addenda} ->
+                    # Code 23 is a checking-credit prenote — amount must be 0.
+                    {%{entry | transaction_code: "23"}, addenda}
+                  end)
+            }
+          ]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, "Prenotification entry"))
+      assert Enum.any?(errors, &String.contains?(&1, "must have amount 0"))
+    end
+
+    test "rejects an unknown change code on Addenda98" do
+      file = valid_file()
+
+      bad_addenda = %BankingStandards.ACH.Addenda98{
+        record_type_code: "7",
+        addenda_type_code: "98",
+        change_code: "C99",
+        original_entry_trace_number: "076401250000001",
+        original_receiving_dfi_identification: "01100001",
+        corrected_data: "",
+        trace_number: "0000001"
+      }
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+          updated_entries = [{entry, [bad_addenda]} | rest]
+          [%{b | entries: updated_entries}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown change code "C99")))
+    end
+
+    test "rejects an unknown return reason code on Addenda99" do
+      file = valid_file()
+
+      bad_addenda = %BankingStandards.ACH.Addenda99{
+        record_type_code: "7",
+        addenda_type_code: "99",
+        return_reason_code: "R99",
+        original_entry_trace_number: "076401250000001",
+        date_of_death: "",
+        original_receiving_dfi_identification: "01100001",
+        addenda_information: "",
+        trace_number: "076401250000001"
+      }
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+          updated_entries = [{entry, [bad_addenda]} | rest]
+          [%{b | entries: updated_entries}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown return reason code "R99")))
+    end
+
+    test "accepts a prenote entry with zero amount" do
+      # Build a single-batch file where both entries are zero-dollar prenotes.
+      file = valid_file()
+
+      file =
+        update_in(file.batches, fn [b] ->
+          updated_entries =
+            Enum.map(b.entries, fn {entry, addenda} ->
+              {%{entry | transaction_code: "23", amount: 0}, addenda}
+            end)
+
+          [
+            %{
+              b
+              | entries: updated_entries,
+                trailer: %{b.trailer | total_credit: 0, total_debit: 0}
+            }
+          ]
+        end)
+
+      file = %{file | control: %{file.control | total_credit: 0, total_debit: 0}}
+
+      assert Validator.validate(file) == :ok
+    end
   end
 
   # Builds a minimal, internally consistent AchFile:

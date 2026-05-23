@@ -8,17 +8,25 @@ defmodule BankingStandards.ACH.Validator do
   are evaluated; errors are not short-circuited.
   """
 
-  alias BankingStandards.ACH.{AchFile, Batch, EntryDetail}
+  alias BankingStandards.ACH.{
+    AchFile,
+    Addenda98,
+    Addenda99,
+    Batch,
+    ChangeCode,
+    EntryDetail,
+    ReturnReasonCode,
+    TransactionCode
+  }
 
   @hash_modulus 10_000_000_000
-
-  @credit_transaction_codes ~w(22 23 24 32 33 34 42 43 44 52 53 54)
-  @debit_transaction_codes ~w(27 28 29 37 38 39 47 48 49 55)
 
   @spec validate(AchFile.t()) :: :ok | {:error, [String.t()]}
   def validate(%AchFile{} = file) do
     errors =
       validate_routing_numbers(file) ++
+        validate_transaction_codes(file) ++
+        validate_addenda_codes(file) ++
         validate_batch_trailers(file) ++
         validate_file_control(file)
 
@@ -69,6 +77,63 @@ defmodule BankingStandards.ACH.Validator do
       end
     end)
   end
+
+  defp validate_transaction_codes(%AchFile{batches: batches}) do
+    batches
+    |> Enum.flat_map(fn %Batch{entries: entries} -> entries end)
+    |> Enum.flat_map(fn {%EntryDetail{} = entry, _addenda} ->
+      validate_transaction_code(entry)
+    end)
+  end
+
+  defp validate_transaction_code(%EntryDetail{
+         transaction_code: code,
+         amount: amount,
+         trace_number: trace
+       }) do
+    cond do
+      not TransactionCode.valid?(code) ->
+        ["Unknown transaction code #{inspect(code)} on entry #{trace}"]
+
+      TransactionCode.prenote?(code) and amount != 0 ->
+        [
+          "Prenotification entry #{trace} (transaction code #{code}) must have amount 0, got #{amount}"
+        ]
+
+      true ->
+        []
+    end
+  end
+
+  defp validate_addenda_codes(%AchFile{batches: batches}) do
+    batches
+    |> Enum.flat_map(fn %Batch{entries: entries} -> entries end)
+    |> Enum.flat_map(fn {_entry, addenda} -> Enum.flat_map(addenda, &validate_addenda_code/1) end)
+  end
+
+  defp validate_addenda_code(%Addenda99{
+         return_reason_code: code,
+         original_entry_trace_number: trace
+       }) do
+    if ReturnReasonCode.valid?(code) do
+      []
+    else
+      ["Unknown return reason code #{inspect(code)} on Addenda99 for trace #{trace}"]
+    end
+  end
+
+  defp validate_addenda_code(%Addenda98{
+         change_code: code,
+         original_entry_trace_number: trace
+       }) do
+    if ChangeCode.valid?(code) do
+      []
+    else
+      ["Unknown change code #{inspect(code)} on Addenda98 for trace #{trace}"]
+    end
+  end
+
+  defp validate_addenda_code(_other), do: []
 
   defp validate_batch_trailers(%AchFile{batches: batches}) do
     Enum.flat_map(batches, &validate_batch_trailer/1)
@@ -161,10 +226,10 @@ defmodule BankingStandards.ACH.Validator do
 
   defp sum_amounts(entries) do
     Enum.reduce(entries, {0, 0}, fn {%EntryDetail{} = entry, _addenda}, {debit, credit} ->
-      cond do
-        entry.transaction_code in @credit_transaction_codes -> {debit, credit + entry.amount}
-        entry.transaction_code in @debit_transaction_codes -> {debit + entry.amount, credit}
-        true -> {debit, credit}
+      case TransactionCode.direction(entry.transaction_code) do
+        :credit -> {debit, credit + entry.amount}
+        :debit -> {debit + entry.amount, credit}
+        nil -> {debit, credit}
       end
     end)
   end
