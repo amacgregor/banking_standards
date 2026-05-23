@@ -6,7 +6,7 @@ defmodule BankingStandards.ACH.ParserTest do
     test "parses a valid ACH file" do
       {:ok, result} = Parser.parse("lib/ach/examples/valid.ach")
 
-      assert length(result) > 0
+      assert result != []
       assert Enum.at(result, 0).__struct__ == BankingStandards.ACH.FileHeader
       assert Enum.at(result, -1).__struct__ == BankingStandards.ACH.FileControl
     end
@@ -28,9 +28,9 @@ defmodule BankingStandards.ACH.ParserTest do
                record.__struct__ == BankingStandards.ACH.BatchHeader
              end) == 2
 
-      assert Enum.count(result, fn record ->
+      assert Enum.any?(result, fn record ->
                record.__struct__ == BankingStandards.ACH.EntryDetail
-             end) > 0
+             end)
 
       assert Enum.count(result, fn record ->
                record.__struct__ == BankingStandards.ACH.BatchTrailer
@@ -40,9 +40,9 @@ defmodule BankingStandards.ACH.ParserTest do
     test "parses an ACH file with addenda records" do
       {:ok, result} = Parser.parse("lib/ach/examples/multi_batch.ach")
 
-      assert Enum.count(result, fn record ->
+      assert Enum.any?(result, fn record ->
                record.__struct__ == BankingStandards.ACH.AddendaRecord
-             end) > 0
+             end)
     end
 
     test "associates entry detail records with their addenda records" do
@@ -58,8 +58,8 @@ defmodule BankingStandards.ACH.ParserTest do
           record.__struct__ == BankingStandards.ACH.AddendaRecord
         end)
 
-      assert length(entry_details) > 0
-      assert length(addenda_records) > 0
+      assert entry_details != []
+      assert addenda_records != []
 
       # Verify Addenda Records belong to their Entry Details
       Enum.each(entry_details, fn entry ->
@@ -71,7 +71,7 @@ defmodule BankingStandards.ACH.ParserTest do
             addenda.entry_detail_sequence_number == entry_sequence_number
           end)
 
-        assert length(matching_addenda) > 0,
+        assert matching_addenda != [],
                "Expected addenda for entry with trace number #{entry.trace_number}, but none found"
       end)
     end
