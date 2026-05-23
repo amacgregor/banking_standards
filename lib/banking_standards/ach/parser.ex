@@ -1,35 +1,56 @@
 defmodule BankingStandards.ACH.Parser do
   @moduledoc """
-  Parses ACH files in NACHA format and maps them to validated structs.
+  Parses NACHA ACH files into a hierarchical `AchFile` struct.
+
+  Parsing is two-pass: each 94-character line is tokenized into a typed
+  record, then a state machine assembles the records into
+  `AchFile -> [Batch -> [{EntryDetail, [AddendaRecord]}]]`. Files with
+  records out of sequence (e.g. an entry after a batch trailer with no
+  new batch header) are rejected with `{:error, reason}`.
   """
 
-  alias BankingStandards.ACH.{AddendaRecord, BatchHeader, BatchTrailer, EntryDetail, FileHeader}
+  alias BankingStandards.ACH.{
+    AchFile,
+    AddendaRecord,
+    Batch,
+    BatchHeader,
+    BatchTrailer,
+    EntryDetail,
+    FileControl,
+    FileHeader
+  }
 
-  @spec parse(String.t()) :: {:ok, list(struct())} | {:error, String.t()}
+  @line_length 95
+
+  @spec parse(String.t()) :: {:ok, AchFile.t()} | {:error, String.t()}
   def parse(file_path) do
-    File.stream!(file_path)
+    file_path
+    |> File.stream!()
+    |> tokenize()
+    |> case do
+      {:ok, records} -> assemble(records)
+      {:error, _} = error -> error
+    end
+  end
+
+  defp tokenize(line_stream) do
+    line_stream
     |> Stream.with_index(1)
-    |> Enum.reduce_while({:ok, %{entries: [], addenda: [], result: []}}, fn {line, index},
-                                                                            {:ok, state} ->
+    |> Enum.reduce_while({:ok, []}, fn {line, index}, {:ok, acc} ->
       case parse_line(line, index) do
-        # Skip padding
-        {:ok, nil} -> {:cont, {:ok, state}}
-        {:ok, struct} -> {:cont, {:ok, %{state | result: [struct | state.result]}}}
-        {:error, error} -> {:halt, {:error, error}}
+        {:ok, :padding} -> {:cont, {:ok, acc}}
+        {:ok, record} -> {:cont, {:ok, [record | acc]}}
+        {:error, _} = error -> {:halt, error}
       end
     end)
     |> case do
-      {:ok, state} -> {:ok, Enum.reverse(state.result)}
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
       error -> error
     end
   end
 
-  @spec parse_line(String.t(), integer()) ::
-          {:ok, nil}
-          | {:ok, struct()}
-          | {:error, String.t()}
   defp parse_line(line, index) do
-    if String.length(line) != 95 do
+    if String.length(line) != @line_length do
       {:error, "Line length error on line #{index}"}
     else
       dispatch_record(line, index)
@@ -38,31 +59,107 @@ defmodule BankingStandards.ACH.Parser do
 
   defp dispatch_record(line, index) do
     case String.slice(line, 0, 3) do
-      "101" -> parse_file_header(line, index)
-      "5" <> _ -> parse_batch_header(line, index)
-      "6" <> _ -> parse_entry_detail(line, index)
-      "7" <> _ -> parse_addenda_record(line, index)
-      "8" <> _ -> parse_batch_trailer(line, index)
-      "900" -> parse_file_control(line, index)
-      "999" -> {:ok, nil}
+      "101" -> {:ok, parse_file_header(line)}
+      "5" <> _ -> {:ok, parse_batch_header(line)}
+      "6" <> _ -> {:ok, parse_entry_detail(line)}
+      "7" <> _ -> {:ok, parse_addenda_record(line)}
+      "8" <> _ -> {:ok, parse_batch_trailer(line)}
+      "900" -> {:ok, parse_file_control(line)}
+      "999" -> {:ok, :padding}
       _ -> {:error, "Invalid record type '#{String.slice(line, 0, 3)}' on line #{index}"}
     end
   end
 
-  defp parse_addenda_record(line, _index) do
-    %AddendaRecord{
-      record_type_code: String.slice(line, 0, 1),
-      addenda_type_code: String.slice(line, 1, 2),
-      trace_number: String.slice(line, 87, 7) |> String.trim(),
-      payment_related_information: String.slice(line, 3, 80) |> String.trim(),
-      addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
-      entry_detail_sequence_number:
-        String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
-    }
-    |> validate_struct(AddendaRecord)
+  defp assemble(records) do
+    records
+    |> Enum.reduce_while({:ok, :awaiting_file_header, nil}, fn record, {:ok, state, acc} ->
+      case step(state, acc, record) do
+        {:ok, new_state, new_acc} -> {:cont, {:ok, new_state, new_acc}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, :done, ach_file} -> {:ok, ach_file}
+      {:ok, state, _} -> {:error, "Unexpected end of file in state #{inspect(state)}"}
+      error -> error
+    end
   end
 
-  defp parse_file_header(line, _index) do
+  defp step(:awaiting_file_header, nil, %FileHeader{} = header) do
+    {:ok, :in_file, %{header: header, batches: [], current_batch: nil}}
+  end
+
+  defp step(:awaiting_file_header, _, record) do
+    {:error, "Expected file header, got #{record_label(record)}"}
+  end
+
+  defp step(:in_file, acc, %BatchHeader{} = batch_header) do
+    {:ok, :in_batch, %{acc | current_batch: %{header: batch_header, entries: []}}}
+  end
+
+  defp step(:in_file, acc, %FileControl{} = control) do
+    ach_file = %AchFile{
+      header: acc.header,
+      batches: Enum.reverse(acc.batches),
+      control: control
+    }
+
+    {:ok, :done, ach_file}
+  end
+
+  defp step(:in_file, _, record) do
+    {:error, "Expected batch header or file control, got #{record_label(record)}"}
+  end
+
+  defp step(:in_batch, acc, %EntryDetail{} = entry) do
+    batch = %{acc.current_batch | entries: [{entry, []} | acc.current_batch.entries]}
+    {:ok, :in_batch, %{acc | current_batch: batch}}
+  end
+
+  defp step(
+         :in_batch,
+         %{current_batch: %{entries: [{entry, addenda} | rest]}} = acc,
+         %AddendaRecord{} = addenda_record
+       ) do
+    batch = %{acc.current_batch | entries: [{entry, [addenda_record | addenda]} | rest]}
+    {:ok, :in_batch, %{acc | current_batch: batch}}
+  end
+
+  defp step(:in_batch, %{current_batch: %{entries: []}}, %AddendaRecord{}) do
+    {:error, "Addenda record before any entry detail in batch"}
+  end
+
+  defp step(:in_batch, acc, %BatchTrailer{} = trailer) do
+    entries =
+      acc.current_batch.entries
+      |> Enum.reverse()
+      |> Enum.map(fn {entry, addenda} -> {entry, Enum.reverse(addenda)} end)
+
+    batch = %Batch{
+      header: acc.current_batch.header,
+      entries: entries,
+      trailer: trailer
+    }
+
+    {:ok, :in_file, %{acc | batches: [batch | acc.batches], current_batch: nil}}
+  end
+
+  defp step(:in_batch, _, record) do
+    {:error, "Expected entry detail, addenda, or batch trailer, got #{record_label(record)}"}
+  end
+
+  defp step(:done, _, record) do
+    {:error, "Unexpected record after file control: #{record_label(record)}"}
+  end
+
+  defp record_label(%FileHeader{}), do: "file header"
+  defp record_label(%BatchHeader{}), do: "batch header"
+  defp record_label(%EntryDetail{}), do: "entry detail"
+  defp record_label(%AddendaRecord{}), do: "addenda record"
+  defp record_label(%BatchTrailer{}), do: "batch trailer"
+  defp record_label(%FileControl{}), do: "file control"
+
+  defp parse_file_header(line) do
     %FileHeader{
       record_type_code: String.slice(line, 0, 1),
       priority_code: String.slice(line, 1, 2),
@@ -77,23 +174,9 @@ defmodule BankingStandards.ACH.Parser do
       immediate_destination_name: String.slice(line, 40, 23) |> String.trim(),
       immediate_origin_name: String.slice(line, 63, 23) |> String.trim()
     }
-    |> validate_struct(FileHeader)
   end
 
-  defp parse_file_control(line, _index) do
-    %BankingStandards.ACH.FileControl{
-      record_type_code: String.slice(line, 0, 1),
-      batch_count: String.slice(line, 1, 6) |> String.trim() |> String.to_integer(),
-      block_count: String.slice(line, 7, 6) |> String.trim() |> String.to_integer(),
-      entry_addenda_count: String.slice(line, 13, 8) |> String.trim() |> String.to_integer(),
-      entry_hash: String.slice(line, 21, 10) |> String.trim(),
-      total_debit: String.slice(line, 31, 12) |> String.trim() |> String.to_integer(),
-      total_credit: String.slice(line, 43, 12) |> String.trim() |> String.to_integer()
-    }
-    |> validate_struct(BankingStandards.ACH.FileControl)
-  end
-
-  defp parse_batch_header(line, _index) do
+  defp parse_batch_header(line) do
     %BatchHeader{
       record_type_code: String.slice(line, 0, 1),
       service_class_code: String.slice(line, 1, 3) |> String.trim(),
@@ -109,10 +192,9 @@ defmodule BankingStandards.ACH.Parser do
       originating_dfi_identification: String.slice(line, 79, 8) |> String.trim(),
       batch_number: String.slice(line, 87, 7) |> String.trim()
     }
-    |> validate_struct(BatchHeader)
   end
 
-  defp parse_entry_detail(line, _index) do
+  defp parse_entry_detail(line) do
     %EntryDetail{
       record_type_code: String.slice(line, 0, 1),
       transaction_code: String.slice(line, 1, 2) |> String.trim(),
@@ -126,10 +208,21 @@ defmodule BankingStandards.ACH.Parser do
       addenda_record_indicator: String.slice(line, 78, 1) |> String.trim() |> String.to_integer(),
       trace_number: String.slice(line, 79, 15) |> String.trim()
     }
-    |> validate_struct(EntryDetail)
   end
 
-  defp parse_batch_trailer(line, _index) do
+  defp parse_addenda_record(line) do
+    %AddendaRecord{
+      record_type_code: String.slice(line, 0, 1),
+      addenda_type_code: String.slice(line, 1, 2),
+      payment_related_information: String.slice(line, 3, 80) |> String.trim(),
+      addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
+      entry_detail_sequence_number:
+        String.slice(line, 87, 7) |> String.trim() |> String.to_integer(),
+      trace_number: String.slice(line, 87, 7) |> String.trim()
+    }
+  end
+
+  defp parse_batch_trailer(line) do
     %BatchTrailer{
       record_type_code: String.slice(line, 0, 1),
       service_class_code: String.slice(line, 1, 3) |> String.trim(),
@@ -141,13 +234,17 @@ defmodule BankingStandards.ACH.Parser do
       originating_dfi_identification: String.slice(line, 54, 8) |> String.trim(),
       batch_number: String.slice(line, 62, 7) |> String.trim()
     }
-    |> validate_struct(BatchTrailer)
   end
 
-  defp validate_struct(struct, module) do
-    case module.validate(struct) do
-      :ok -> {:ok, struct}
-      {:error, error} -> {:error, error}
-    end
+  defp parse_file_control(line) do
+    %FileControl{
+      record_type_code: String.slice(line, 0, 1),
+      batch_count: String.slice(line, 1, 6) |> String.trim() |> String.to_integer(),
+      block_count: String.slice(line, 7, 6) |> String.trim() |> String.to_integer(),
+      entry_addenda_count: String.slice(line, 13, 8) |> String.trim() |> String.to_integer(),
+      entry_hash: String.slice(line, 21, 10) |> String.trim(),
+      total_debit: String.slice(line, 31, 12) |> String.trim() |> String.to_integer(),
+      total_credit: String.slice(line, 43, 12) |> String.trim() |> String.to_integer()
+    }
   end
 end

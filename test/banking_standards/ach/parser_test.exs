@@ -1,14 +1,31 @@
 defmodule BankingStandards.ACH.ParserTest do
   use ExUnit.Case, async: true
-  alias BankingStandards.ACH.Parser
+  alias BankingStandards.ACH.{AchFile, AddendaRecord, Batch, EntryDetail, Parser}
 
   describe "parse/1" do
-    test "parses a valid ACH file" do
-      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/valid.ach")
+    test "parses a valid ACH file into an AchFile struct" do
+      {:ok, %AchFile{} = file} = Parser.parse("lib/banking_standards/ach/examples/valid.ach")
 
-      assert result != []
-      assert Enum.at(result, 0).__struct__ == BankingStandards.ACH.FileHeader
-      assert Enum.at(result, -1).__struct__ == BankingStandards.ACH.FileControl
+      assert file.header.record_type_code == "1"
+      assert file.control.record_type_code == "9"
+      assert length(file.batches) == 1
+
+      [%Batch{entries: entries}] = file.batches
+      assert length(entries) == 2
+      assert Enum.all?(entries, fn {entry, addenda} -> match?(%EntryDetail{}, entry) and addenda == [] end)
+    end
+
+    test "associates addenda with their preceding entry" do
+      {:ok, %AchFile{batches: [%Batch{entries: entries}]}} =
+        Parser.parse("lib/banking_standards/ach/examples/entry_addenda.ach")
+
+      assert length(entries) == 2
+
+      Enum.each(entries, fn {%EntryDetail{} = entry, addenda} ->
+        assert [%AddendaRecord{} = a] = addenda
+        assert a.entry_detail_sequence_number ==
+                 entry.trace_number |> String.slice(-7..-1) |> String.to_integer()
+      end)
     end
 
     test "handles line length error" do
@@ -21,62 +38,15 @@ defmodule BankingStandards.ACH.ParserTest do
       assert error == "Invalid record type '901' on line 3"
     end
 
-    test "parses an ACH file with multiple records" do
-      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
-
-      assert Enum.count(result, fn record ->
-               record.__struct__ == BankingStandards.ACH.BatchHeader
-             end) == 2
-
-      assert Enum.any?(result, fn record ->
-               record.__struct__ == BankingStandards.ACH.EntryDetail
-             end)
-
-      assert Enum.count(result, fn record ->
-               record.__struct__ == BankingStandards.ACH.BatchTrailer
-             end) == 2
+    test "rejects records out of sequence" do
+      # multi_batch.ach has an entry detail + addenda orphaned after the second
+      # batch trailer with no new batch header. The hierarchical parser rejects
+      # this; a fixed multi_batch fixture is added in the generator commit.
+      {:error, error} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
+      assert error =~ "Expected batch header or file control, got entry detail"
     end
 
-    test "parses an ACH file with addenda records" do
-      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/multi_batch.ach")
-
-      assert Enum.any?(result, fn record ->
-               record.__struct__ == BankingStandards.ACH.AddendaRecord
-             end)
-    end
-
-    test "associates entry detail records with their addenda records" do
-      {:ok, result} = Parser.parse("lib/banking_standards/ach/examples/entry_addenda.ach")
-
-      # Filter Entry Detail Records
-      entry_details =
-        Enum.filter(result, fn record -> record.__struct__ == BankingStandards.ACH.EntryDetail end)
-
-      # Filter Addenda Records
-      addenda_records =
-        Enum.filter(result, fn record ->
-          record.__struct__ == BankingStandards.ACH.AddendaRecord
-        end)
-
-      assert entry_details != []
-      assert addenda_records != []
-
-      # Verify Addenda Records belong to their Entry Details
-      Enum.each(entry_details, fn entry ->
-        # Extract the sequence number (last 7 characters) from the trace number
-        entry_sequence_number = String.slice(entry.trace_number, -7..-1) |> String.to_integer()
-
-        matching_addenda =
-          Enum.filter(addenda_records, fn addenda ->
-            addenda.entry_detail_sequence_number == entry_sequence_number
-          end)
-
-        assert matching_addenda != [],
-               "Expected addenda for entry with trace number #{entry.trace_number}, but none found"
-      end)
-    end
-
-    test "returns an error if the file does not exist" do
+    test "raises if the file does not exist" do
       assert_raise File.Error, fn ->
         Parser.parse("lib/banking_standards/ach/examples/nonexistent.ach")
       end
