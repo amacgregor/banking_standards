@@ -12,7 +12,10 @@ defmodule BankingStandards.ACH.ParserTest do
 
       [%Batch{entries: entries}] = file.batches
       assert length(entries) == 2
-      assert Enum.all?(entries, fn {entry, addenda} -> match?(%EntryDetail{}, entry) and addenda == [] end)
+
+      assert Enum.all?(entries, fn {entry, addenda} ->
+               match?(%EntryDetail{}, entry) and addenda == []
+             end)
     end
 
     test "associates addenda with their preceding entry" do
@@ -23,6 +26,7 @@ defmodule BankingStandards.ACH.ParserTest do
 
       Enum.each(entries, fn {%EntryDetail{} = entry, addenda} ->
         assert [%Addenda05{} = a] = addenda
+
         assert a.entry_detail_sequence_number ==
                  entry.trace_number |> String.slice(-7..-1) |> String.to_integer()
       end)
@@ -62,8 +66,14 @@ defmodule BankingStandards.ACH.ParserTest do
     test "rejects an entry detail outside any batch" do
       # File header, then an entry detail with no batch header in between.
       lines = [
-        String.pad_trailing("101 076401251 1234567890260523120010094101DEST                   ORIG", 94),
-        String.pad_trailing("6220110000159876543210000010000               DOE JOHN              0076401250000001", 94)
+        String.pad_trailing(
+          "101 076401251 1234567890260523120010094101DEST                   ORIG",
+          94
+        ),
+        String.pad_trailing(
+          "6220110000159876543210000010000               DOE JOHN              0076401250000001",
+          94
+        )
       ]
 
       content = Enum.join(lines, "\n") <> "\n"

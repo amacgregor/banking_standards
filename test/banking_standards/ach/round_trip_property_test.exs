@@ -153,7 +153,9 @@ defmodule BankingStandards.ACH.RoundTripPropertyTest do
   defp build_entries(entry_specs) do
     entry_specs
     |> Enum.with_index(1)
-    |> Enum.map(fn {spec, entry_idx} -> {build_entry(spec, entry_idx), addenda_for(spec, entry_idx)} end)
+    |> Enum.map(fn {spec, entry_idx} ->
+      {build_entry(spec, entry_idx), addenda_for(spec, entry_idx)}
+    end)
   end
 
   defp build_entry(spec, entry_idx) do
@@ -212,7 +214,9 @@ defmodule BankingStandards.ACH.RoundTripPropertyTest do
 
   defp entry_hash(entries) do
     entries
-    |> Enum.map(fn {%EntryDetail{} = e, _} -> String.to_integer(e.receiving_dfi_identification) end)
+    |> Enum.map(fn {%EntryDetail{} = e, _} ->
+      String.to_integer(e.receiving_dfi_identification)
+    end)
     |> Enum.sum()
     |> rem(@hash_modulus)
   end
