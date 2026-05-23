@@ -1,6 +1,6 @@
 defmodule BankingStandards.ACH.ParserTest do
   use ExUnit.Case, async: true
-  alias BankingStandards.ACH.{AchFile, AddendaRecord, Batch, EntryDetail, Parser}
+  alias BankingStandards.ACH.{AchFile, Addenda05, Batch, EntryDetail, Parser}
 
   describe "parse/1" do
     test "parses a valid ACH file into an AchFile struct" do
@@ -22,7 +22,7 @@ defmodule BankingStandards.ACH.ParserTest do
       assert length(entries) == 2
 
       Enum.each(entries, fn {%EntryDetail{} = entry, addenda} ->
-        assert [%AddendaRecord{} = a] = addenda
+        assert [%Addenda05{} = a] = addenda
         assert a.entry_detail_sequence_number ==
                  entry.trace_number |> String.slice(-7..-1) |> String.to_integer()
       end)

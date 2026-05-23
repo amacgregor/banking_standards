@@ -11,7 +11,10 @@ defmodule BankingStandards.ACH.Parser do
 
   alias BankingStandards.ACH.{
     AchFile,
-    AddendaRecord,
+    Addenda02,
+    Addenda05,
+    Addenda98,
+    Addenda99,
     Batch,
     BatchHeader,
     BatchTrailer,
@@ -62,7 +65,7 @@ defmodule BankingStandards.ACH.Parser do
       "101" -> {:ok, parse_file_header(line)}
       "5" <> _ -> {:ok, parse_batch_header(line)}
       "6" <> _ -> {:ok, parse_entry_detail(line)}
-      "7" <> _ -> {:ok, parse_addenda_record(line)}
+      "7" <> _ -> parse_addenda(line, index)
       "8" <> _ -> {:ok, parse_batch_trailer(line)}
       "900" -> {:ok, parse_file_control(line)}
       "999" -> {:ok, :padding}
@@ -119,13 +122,17 @@ defmodule BankingStandards.ACH.Parser do
   defp step(
          :in_batch,
          %{current_batch: %{entries: [{entry, addenda} | rest]}} = acc,
-         %AddendaRecord{} = addenda_record
-       ) do
+         addenda_record
+       )
+       when is_struct(addenda_record, Addenda02) or is_struct(addenda_record, Addenda05) or
+              is_struct(addenda_record, Addenda98) or is_struct(addenda_record, Addenda99) do
     batch = %{acc.current_batch | entries: [{entry, [addenda_record | addenda]} | rest]}
     {:ok, :in_batch, %{acc | current_batch: batch}}
   end
 
-  defp step(:in_batch, %{current_batch: %{entries: []}}, %AddendaRecord{}) do
+  defp step(:in_batch, %{current_batch: %{entries: []}}, addenda_record)
+       when is_struct(addenda_record, Addenda02) or is_struct(addenda_record, Addenda05) or
+              is_struct(addenda_record, Addenda98) or is_struct(addenda_record, Addenda99) do
     {:error, "Addenda record before any entry detail in batch"}
   end
 
@@ -155,7 +162,10 @@ defmodule BankingStandards.ACH.Parser do
   defp record_label(%FileHeader{}), do: "file header"
   defp record_label(%BatchHeader{}), do: "batch header"
   defp record_label(%EntryDetail{}), do: "entry detail"
-  defp record_label(%AddendaRecord{}), do: "addenda record"
+  defp record_label(%Addenda02{}), do: "addenda record"
+  defp record_label(%Addenda05{}), do: "addenda record"
+  defp record_label(%Addenda98{}), do: "addenda record"
+  defp record_label(%Addenda99{}), do: "addenda record"
   defp record_label(%BatchTrailer{}), do: "batch trailer"
   defp record_label(%FileControl{}), do: "file control"
 
@@ -210,15 +220,66 @@ defmodule BankingStandards.ACH.Parser do
     }
   end
 
-  defp parse_addenda_record(line) do
-    %AddendaRecord{
+  defp parse_addenda(line, index) do
+    case String.slice(line, 1, 2) do
+      "02" -> {:ok, parse_addenda_02(line)}
+      "05" -> {:ok, parse_addenda_05(line)}
+      "98" -> {:ok, parse_addenda_98(line)}
+      "99" -> {:ok, parse_addenda_99(line)}
+      type -> {:error, "Unsupported addenda type code '#{type}' on line #{index}"}
+    end
+  end
+
+  defp parse_addenda_02(line) do
+    %Addenda02{
+      record_type_code: String.slice(line, 0, 1),
+      addenda_type_code: String.slice(line, 1, 2),
+      reference_information_1: String.slice(line, 3, 7) |> String.trim(),
+      reference_information_2: String.slice(line, 10, 3) |> String.trim(),
+      terminal_identification_code: String.slice(line, 13, 6) |> String.trim(),
+      transaction_serial_number: String.slice(line, 19, 6) |> String.trim(),
+      transaction_date: String.slice(line, 25, 4) |> String.trim(),
+      authorization_code_or_card_expiration_date: String.slice(line, 29, 6) |> String.trim(),
+      terminal_location: String.slice(line, 35, 27) |> String.trim(),
+      terminal_city: String.slice(line, 62, 15) |> String.trim(),
+      terminal_state: String.slice(line, 77, 2) |> String.trim(),
+      trace_number: String.slice(line, 79, 15) |> String.trim()
+    }
+  end
+
+  defp parse_addenda_05(line) do
+    %Addenda05{
       record_type_code: String.slice(line, 0, 1),
       addenda_type_code: String.slice(line, 1, 2),
       payment_related_information: String.slice(line, 3, 80) |> String.trim(),
       addenda_sequence_number: String.slice(line, 83, 4) |> String.trim() |> String.to_integer(),
       entry_detail_sequence_number:
-        String.slice(line, 87, 7) |> String.trim() |> String.to_integer(),
+        String.slice(line, 87, 7) |> String.trim() |> String.to_integer()
+    }
+  end
+
+  defp parse_addenda_98(line) do
+    %Addenda98{
+      record_type_code: String.slice(line, 0, 1),
+      addenda_type_code: String.slice(line, 1, 2),
+      change_code: String.slice(line, 3, 3) |> String.trim(),
+      original_entry_trace_number: String.slice(line, 6, 15) |> String.trim(),
+      original_receiving_dfi_identification: String.slice(line, 79, 8) |> String.trim(),
+      corrected_data: String.slice(line, 27, 29) |> String.trim(),
       trace_number: String.slice(line, 87, 7) |> String.trim()
+    }
+  end
+
+  defp parse_addenda_99(line) do
+    %Addenda99{
+      record_type_code: String.slice(line, 0, 1),
+      addenda_type_code: String.slice(line, 1, 2),
+      return_reason_code: String.slice(line, 3, 3) |> String.trim(),
+      original_entry_trace_number: String.slice(line, 6, 15) |> String.trim(),
+      date_of_death: String.slice(line, 21, 6) |> String.trim(),
+      original_receiving_dfi_identification: String.slice(line, 27, 8) |> String.trim(),
+      addenda_information: String.slice(line, 35, 44) |> String.trim(),
+      trace_number: String.slice(line, 79, 15) |> String.trim()
     }
   end
 
