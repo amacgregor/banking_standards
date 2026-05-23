@@ -13,6 +13,7 @@ alias BankingStandards.ACH.{
   FileControl,
   FileHeader,
   Generator,
+  SecCode,
   Validator
 }
 
@@ -191,12 +192,118 @@ multi_batch_file = %{
     }
 }
 
-# Write all three.
-targets = [
-  {"lib/banking_standards/ach/examples/valid.ach", valid_file},
-  {"lib/banking_standards/ach/examples/entry_addenda.ach", addenda_file},
-  {"lib/banking_standards/ach/examples/multi_batch.ach", multi_batch_file}
-]
+# One example file per SEC. Each picks an allowed transaction code and an
+# addenda count compatible with the SEC's spec, so the resulting file
+# validates cleanly.
+sec_examples =
+  Enum.map(SecCode.all(), fn sec ->
+    spec = SecCode.spec(sec)
+    {_min, max_addenda, allowed_types} = spec.addenda
+
+    # Pick the first non-prenote transaction code from the SEC's allowed list.
+    tx_code =
+      spec.transaction_codes
+      |> Enum.reject(fn code -> String.ends_with?(code, "3") or String.ends_with?(code, "8") end)
+      |> List.first()
+
+    # Determine debit/credit direction from the transaction code's last digit
+    # bucket (2,3,4 = credit; 7,8,9 = debit; 5 = loan-debit).
+    direction =
+      cond do
+        String.ends_with?(tx_code, "2") or String.ends_with?(tx_code, "4") -> :credit
+        true -> :debit
+      end
+
+    # Generate one entry with one addenda if the SEC permits it.
+    addenda_count = if max_addenda > 0 and allowed_types != [], do: 1, else: 0
+    amount = 50_000
+
+    entry =
+      %{build_entry.(amount, "0000001", addenda_count) | transaction_code: tx_code}
+
+    addenda =
+      if addenda_count == 1 do
+        [
+          %Addenda05{
+            record_type_code: "7",
+            addenda_type_code: "05",
+            payment_related_information: "EXAMPLE #{sec}",
+            addenda_sequence_number: 1,
+            entry_detail_sequence_number: 1
+          }
+        ]
+      else
+        []
+      end
+
+    {total_debit, total_credit} =
+      case direction do
+        :credit -> {0, amount}
+        :debit -> {amount, 0}
+      end
+
+    service_class_code =
+      case direction do
+        :credit -> "220"
+        :debit -> "225"
+      end
+
+    batch = %Batch{
+      header: %BatchHeader{
+        record_type_code: "5",
+        service_class_code: service_class_code,
+        company_name: "ACME",
+        company_discretionary_data: "",
+        company_identification: "1234567890",
+        standard_entry_class_code: sec,
+        company_entry_description: "EXAMPLE",
+        company_descriptive_date: "260523",
+        effective_entry_date: "260524",
+        settlement_date: "",
+        originator_status_code: "1",
+        originating_dfi_identification: "07640125",
+        batch_number: "0000001"
+      },
+      entries: [{entry, addenda}],
+      trailer: %BatchTrailer{
+        record_type_code: "8",
+        service_class_code: service_class_code,
+        entry_addenda_count: 1 + addenda_count,
+        entry_hash: pad10.(rdfi_int),
+        total_debit: total_debit,
+        total_credit: total_credit,
+        company_identification: "1234567890",
+        originating_dfi_identification: "07640125",
+        batch_number: "0000001"
+      }
+    }
+
+    file = %AchFile{
+      header: file_header,
+      batches: [batch],
+      control: %FileControl{
+        record_type_code: "9",
+        batch_count: 1,
+        block_count: 1,
+        entry_addenda_count: 1 + addenda_count,
+        entry_hash: pad10.(rdfi_int),
+        total_debit: total_debit,
+        total_credit: total_credit
+      }
+    }
+
+    {"lib/banking_standards/ach/examples/sec/#{String.downcase(sec)}.ach", file}
+  end)
+
+targets =
+  [
+    {"lib/banking_standards/ach/examples/valid.ach", valid_file},
+    {"lib/banking_standards/ach/examples/entry_addenda.ach", addenda_file},
+    {"lib/banking_standards/ach/examples/multi_batch.ach", multi_batch_file}
+  ] ++ sec_examples
+
+# Make sure the per-SEC dir exists.
+File.mkdir_p!("lib/banking_standards/ach/examples/sec")
 
 Enum.each(targets, fn {path, file} ->
   case Validator.validate(file) do
