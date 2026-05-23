@@ -8,12 +8,9 @@ defmodule BankingStandards.ACH.Validator do
   are evaluated; errors are not short-circuited.
   """
 
-  alias BankingStandards.ACH.{AchFile, Batch, EntryDetail}
+  alias BankingStandards.ACH.{AchFile, Batch, EntryDetail, TransactionCode}
 
   @hash_modulus 10_000_000_000
-
-  @credit_transaction_codes ~w(22 23 24 32 33 34 42 43 44 52 53 54)
-  @debit_transaction_codes ~w(27 28 29 37 38 39 47 48 49 55)
 
   @spec validate(AchFile.t()) :: :ok | {:error, [String.t()]}
   def validate(%AchFile{} = file) do
@@ -161,10 +158,10 @@ defmodule BankingStandards.ACH.Validator do
 
   defp sum_amounts(entries) do
     Enum.reduce(entries, {0, 0}, fn {%EntryDetail{} = entry, _addenda}, {debit, credit} ->
-      cond do
-        entry.transaction_code in @credit_transaction_codes -> {debit, credit + entry.amount}
-        entry.transaction_code in @debit_transaction_codes -> {debit + entry.amount, credit}
-        true -> {debit, credit}
+      case TransactionCode.direction(entry.transaction_code) do
+        :credit -> {debit, credit + entry.amount}
+        :debit -> {debit + entry.amount, credit}
+        nil -> {debit, credit}
       end
     end)
   end
