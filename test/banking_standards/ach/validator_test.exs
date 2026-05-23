@@ -148,6 +148,31 @@ defmodule BankingStandards.ACH.ValidatorTest do
       assert Enum.any?(errors, &String.contains?(&1, "must have amount 0"))
     end
 
+    test "rejects an unknown return reason code on Addenda99" do
+      file = valid_file()
+
+      bad_addenda = %BankingStandards.ACH.Addenda99{
+        record_type_code: "7",
+        addenda_type_code: "99",
+        return_reason_code: "R99",
+        original_entry_trace_number: "076401250000001",
+        date_of_death: "",
+        original_receiving_dfi_identification: "01100001",
+        addenda_information: "",
+        trace_number: "076401250000001"
+      }
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+          updated_entries = [{entry, [bad_addenda]} | rest]
+          [%{b | entries: updated_entries}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown return reason code "R99")))
+    end
+
     test "accepts a prenote entry with zero amount" do
       # Build a single-batch file where both entries are zero-dollar prenotes.
       file = valid_file()

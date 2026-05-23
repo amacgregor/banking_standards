@@ -8,7 +8,14 @@ defmodule BankingStandards.ACH.Validator do
   are evaluated; errors are not short-circuited.
   """
 
-  alias BankingStandards.ACH.{AchFile, Batch, EntryDetail, TransactionCode}
+  alias BankingStandards.ACH.{
+    AchFile,
+    Addenda99,
+    Batch,
+    EntryDetail,
+    ReturnReasonCode,
+    TransactionCode
+  }
 
   @hash_modulus 10_000_000_000
 
@@ -17,6 +24,7 @@ defmodule BankingStandards.ACH.Validator do
     errors =
       validate_routing_numbers(file) ++
         validate_transaction_codes(file) ++
+        validate_addenda_codes(file) ++
         validate_batch_trailers(file) ++
         validate_file_control(file)
 
@@ -94,6 +102,25 @@ defmodule BankingStandards.ACH.Validator do
         []
     end
   end
+
+  defp validate_addenda_codes(%AchFile{batches: batches}) do
+    batches
+    |> Enum.flat_map(fn %Batch{entries: entries} -> entries end)
+    |> Enum.flat_map(fn {_entry, addenda} -> Enum.flat_map(addenda, &validate_addenda_code/1) end)
+  end
+
+  defp validate_addenda_code(%Addenda99{
+         return_reason_code: code,
+         original_entry_trace_number: trace
+       }) do
+    if ReturnReasonCode.valid?(code) do
+      []
+    else
+      ["Unknown return reason code #{inspect(code)} on Addenda99 for trace #{trace}"]
+    end
+  end
+
+  defp validate_addenda_code(_other), do: []
 
   defp validate_batch_trailers(%AchFile{batches: batches}) do
     Enum.flat_map(batches, &validate_batch_trailer/1)
