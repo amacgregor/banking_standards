@@ -10,8 +10,10 @@ defmodule BankingStandards.ACH.Validator do
 
   alias BankingStandards.ACH.{
     AchFile,
+    Addenda98,
     Addenda99,
     Batch,
+    ChangeCode,
     EntryDetail,
     ReturnReasonCode,
     TransactionCode
@@ -117,6 +119,17 @@ defmodule BankingStandards.ACH.Validator do
       []
     else
       ["Unknown return reason code #{inspect(code)} on Addenda99 for trace #{trace}"]
+    end
+  end
+
+  defp validate_addenda_code(%Addenda98{
+         change_code: code,
+         original_entry_trace_number: trace
+       }) do
+    if ChangeCode.valid?(code) do
+      []
+    else
+      ["Unknown change code #{inspect(code)} on Addenda98 for trace #{trace}"]
     end
   end
 

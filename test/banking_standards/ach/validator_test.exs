@@ -148,6 +148,30 @@ defmodule BankingStandards.ACH.ValidatorTest do
       assert Enum.any?(errors, &String.contains?(&1, "must have amount 0"))
     end
 
+    test "rejects an unknown change code on Addenda98" do
+      file = valid_file()
+
+      bad_addenda = %BankingStandards.ACH.Addenda98{
+        record_type_code: "7",
+        addenda_type_code: "98",
+        change_code: "C99",
+        original_entry_trace_number: "076401250000001",
+        original_receiving_dfi_identification: "01100001",
+        corrected_data: "",
+        trace_number: "0000001"
+      }
+
+      file =
+        update_in(file.batches, fn [b] ->
+          [{entry, _} | rest] = b.entries
+          updated_entries = [{entry, [bad_addenda]} | rest]
+          [%{b | entries: updated_entries}]
+        end)
+
+      assert {:error, errors} = Validator.validate(file)
+      assert Enum.any?(errors, &String.contains?(&1, ~s(Unknown change code "C99")))
+    end
+
     test "rejects an unknown return reason code on Addenda99" do
       file = valid_file()
 
