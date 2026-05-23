@@ -89,6 +89,14 @@ jobs:
     - name: Run tests
       run: mix test
 
+    # Step: Run Credo (includes ExSlop plugin checks).
+    - name: Credo
+      run: mix credo --strict
+
+    # Step: Detect code duplication.
+    - name: ExDNA
+      run: mix ex_dna
+
     # Update status to Discord
     - name: Notify Discord about Status
       uses: sarisia/actions-status-discord@v1

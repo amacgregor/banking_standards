@@ -26,3 +26,5 @@ banking_standards-*.tar
 /tmp/
 
 nohup.out
+
+CLAUDE.local.md

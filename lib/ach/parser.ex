@@ -3,7 +3,7 @@ defmodule BankingStandards.ACH.Parser do
   Parses ACH files in NACHA format and maps them to validated structs.
   """
 
-  alias BankingStandards.ACH.{BatchHeader, EntryDetail, BatchTrailer, FileHeader, AddendaRecord}
+  alias BankingStandards.ACH.{AddendaRecord, BatchHeader, BatchTrailer, EntryDetail, FileHeader}
 
   @spec parse(String.t()) :: {:ok, list(struct())} | {:error, String.t()}
   def parse(file_path) do
@@ -29,20 +29,23 @@ defmodule BankingStandards.ACH.Parser do
           | {:ok, struct()}
           | {:error, String.t()}
   defp parse_line(line, index) do
-    # Validate line length
     if String.length(line) != 95 do
       {:error, "Line length error on line #{index}"}
     else
-      case String.slice(line, 0, 3) do
-        "101" -> parse_file_header(line, index)
-        "5" <> _ -> parse_batch_header(line, index)
-        "6" <> _ -> parse_entry_detail(line, index)
-        "7" <> _ -> parse_addenda_record(line, index)
-        "8" <> _ -> parse_batch_trailer(line, index)
-        "900" -> parse_file_control(line, index)
-        "999" -> {:ok, nil}
-        _ -> {:error, "Invalid record type '#{String.slice(line, 0, 3)}' on line #{index}"}
-      end
+      dispatch_record(line, index)
+    end
+  end
+
+  defp dispatch_record(line, index) do
+    case String.slice(line, 0, 3) do
+      "101" -> parse_file_header(line, index)
+      "5" <> _ -> parse_batch_header(line, index)
+      "6" <> _ -> parse_entry_detail(line, index)
+      "7" <> _ -> parse_addenda_record(line, index)
+      "8" <> _ -> parse_batch_trailer(line, index)
+      "900" -> parse_file_control(line, index)
+      "999" -> {:ok, nil}
+      _ -> {:error, "Invalid record type '#{String.slice(line, 0, 3)}' on line #{index}"}
     end
   end
 
