@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; case \"$f\" in *.ex|*.exs) out=$(mix format \"$f\" 2>&1) || echo \"$out\";; esac; }",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; case \"$f\" in *.ex|*.exs) out=$(mix compile --warnings-as-errors 2>&1) || echo \"$out\";; esac; }",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
