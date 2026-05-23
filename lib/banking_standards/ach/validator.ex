@@ -13,9 +13,11 @@ defmodule BankingStandards.ACH.Validator do
     Addenda98,
     Addenda99,
     Batch,
+    BatchHeader,
     ChangeCode,
     EntryDetail,
     ReturnReasonCode,
+    SecCode,
     TransactionCode
   }
 
@@ -27,6 +29,7 @@ defmodule BankingStandards.ACH.Validator do
       validate_routing_numbers(file) ++
         validate_transaction_codes(file) ++
         validate_addenda_codes(file) ++
+        validate_sec_codes(file) ++
         validate_batch_trailers(file) ++
         validate_file_control(file)
 
@@ -103,6 +106,89 @@ defmodule BankingStandards.ACH.Validator do
       true ->
         []
     end
+  end
+
+  defp validate_sec_codes(%AchFile{batches: batches}) do
+    Enum.flat_map(batches, &validate_batch_sec/1)
+  end
+
+  defp validate_batch_sec(%Batch{
+         header: %BatchHeader{standard_entry_class_code: sec} = header,
+         entries: entries
+       }) do
+    if SecCode.valid?(sec) do
+      Enum.flat_map(entries, fn entry ->
+        validate_entry_against_sec(entry, sec, header.batch_number)
+      end)
+    else
+      ["Unknown SEC code #{inspect(sec)} on batch #{header.batch_number}"]
+    end
+  end
+
+  defp validate_entry_against_sec({%EntryDetail{} = entry, addenda}, sec, batch_number) do
+    validate_entry_transaction_code(entry, sec, batch_number) ++
+      validate_entry_addenda(entry, addenda, sec, batch_number)
+  end
+
+  defp validate_entry_transaction_code(
+         %EntryDetail{transaction_code: code, trace_number: trace},
+         sec,
+         batch_number
+       ) do
+    allowed = SecCode.allowed_transaction_codes(sec)
+
+    if code in allowed do
+      []
+    else
+      [
+        "Transaction code #{code} is not permitted for SEC #{sec} (batch #{batch_number}, entry #{trace})"
+      ]
+    end
+  end
+
+  defp validate_entry_addenda(%EntryDetail{trace_number: trace}, addenda, sec, batch_number) do
+    # Only Addenda05 records are subject to per-SEC count/type limits.
+    # Addenda98 (NOC) and Addenda99 (return) appear on NOC/return files and
+    # are governed by their own R/C-code validation, not the SEC's origination
+    # limits.
+    origination_addenda =
+      Enum.reject(addenda, &is_struct(&1, Addenda98)) |> Enum.reject(&is_struct(&1, Addenda99))
+
+    {min, max} = SecCode.addenda_range(sec)
+    allowed_types = SecCode.allowed_addenda_types(sec)
+    count = length(origination_addenda)
+
+    count_error =
+      cond do
+        count < min ->
+          [
+            "SEC #{sec} requires at least #{min} addenda (batch #{batch_number}, entry #{trace}, got #{count})"
+          ]
+
+        count > max ->
+          [
+            "SEC #{sec} permits at most #{max} addenda (batch #{batch_number}, entry #{trace}, got #{count})"
+          ]
+
+        true ->
+          []
+      end
+
+    type_errors =
+      origination_addenda
+      |> Enum.flat_map(fn a ->
+        type = a.addenda_type_code
+
+        if type in allowed_types do
+          []
+        else
+          [
+            "Addenda type #{type} is not permitted for SEC #{sec} (batch #{batch_number}, entry #{trace})"
+          ]
+        end
+      end)
+
+    count_error ++ type_errors
   end
 
   defp validate_addenda_codes(%AchFile{batches: batches}) do
