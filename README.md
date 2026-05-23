@@ -2,33 +2,27 @@
 
 **Tagline:** "Building the foundation for seamless financial transactions in Elixir."
 
-BankingStandards is an Elixir library dedicated to providing robust tools and utilities for managing financial and payment file standards. Our mission is to empower developers with reliable, extensible, and standards-compliant solutions for handling complex banking workflows. We envision a future where integrating banking and payment systems into Elixir applications is as seamless and straightforward as possible.
+An Elixir library for parsing, generating, and validating financial and payment file standards. Currently ships with NACHA ACH support; Canadian (RTR, Interac, CPA AFT) and ISO 20022 rails are on the roadmap.
 
-This library is designed to be the cornerstone of financial technology in Elixir, starting with NACHA ACH standards and expanding to include a comprehensive suite of tools for global banking protocols. By prioritizing usability, compliance, and extensibility, BankingStandards aims to bridge the gap between financial complexity and developer productivity.
+## What ships today
 
-## Features
+NACHA ACH (United States), read **and** write:
 
-- **ACH.Parser**: Parse NACHA ACH files into structured Elixir data.
-- **ACH.Generator**: Generate NACHA ACH-compliant files from structured data.
-- **ACH.Validator**: Validate ACH files or data against NACHA compliance rules.
-- Planned support for:
-  - CPA AFT (Canada)
-  - ISO 20022 (International)
-  - EDI 820 (Electronic Payment Order)
+- `BankingStandards.ACH.Parser` — `parse/1` reads a file from disk, `parse_string/1` parses an in-memory string. Both return `{:ok, %AchFile{}}` with a hierarchical structure (`AchFile → [Batch → [{EntryDetail, [Addenda]}]]`) or `{:error, reason}` for files with records out of sequence or bad line lengths.
+- `BankingStandards.ACH.Generator` — `generate/1` serializes an `AchFile` back to the 94-character fixed-width NACHA format with proper block padding. `write/2` writes the result to a path. Round-trip identity holds (parse → generate → parse).
+- `BankingStandards.ACH.Validator` — `validate/1` cross-checks batch trailers and the file control against the actual entries (entry hash, counts, dollar sums, block count) and verifies every routing number's ABA check digit. `valid_routing_number?/1` is exposed for direct use.
 
-## Common Standards
+Addenda are typed by addenda type code: `Addenda05` (payment-related info), `Addenda02` (POS terminal), `Addenda98` (Notification of Change), `Addenda99` (return). IAT addenda (types 10–18) are not yet supported.
 
-### NACHA ACH (USA)
-The NACHA ACH standard is the backbone of electronic payments in the United States, enabling direct deposits, vendor payments, and tax remittances. BankingStandards provides tools for parsing, generating, and validating ACH files to ensure compliance with NACHA rules.
+## Roadmap
 
-### CPA AFT (Canada)
-The CPA AFT standard is widely used in Canada for electronic funds transfers, such as payroll and CRA payments. Future updates to BankingStandards will include modules for parsing and generating CPA AFT files.
+In priority order:
 
-### ISO 20022 (International)
-ISO 20022 is a global standard for electronic data interchange between financial institutions. It is widely adopted for international transactions, including SEPA payments in Europe and cross-border wire transfers. BankingStandards will include tools for working with ISO 20022 XML-based schemas.
-
-### EDI 820
-A common standard for electronic payment orders and remittance advice, used primarily in B2B transactions. Planned support for EDI standards will enhance BankingStandards' utility in corporate finance.
+1. **Full NACHA coverage** — SEC code enum (PPD, CCD, WEB, TEL, CIE, CTX, ARC, BOC, POP, RCK, IAT) with per-SEC validation, transaction code semantics, return entries (R-codes), Notification of Change (C-codes), prenotifications.
+2. **ISO 20022 XML foundation** — `saxy`-based parser/generator for ISO 20022 envelopes. Reusable across RTR, future SEPA, future Fedwire ISO migration.
+3. **Canadian Real-Time Rail (RTR)** — pacs.008 / pacs.002 / camt.056 messages with the Payments Canada profile constraints layered on top of the generic ISO 20022 modules.
+4. **Interac** — research spike to identify what's actually standardized (versus bank-API mediated) before any code lands.
+5. **CPA AFT (EFT 005)** — legacy Canadian batch rail, 1464-byte fixed-width records, same hierarchical pattern as ACH.
 
 ## Installation
 
@@ -42,99 +36,58 @@ def deps do
 end
 ```
 
-Then run:
-
-```bash
-mix deps.get
-```
-
 ## Usage
 
-### Parsing ACH Files
+### Parsing
 
 ```elixir
 alias BankingStandards.ACH.Parser
 
-{:ok, data} = Parser.parse("path/to/file.ach")
-data |> IO.inspect()
+{:ok, ach_file} = Parser.parse("path/to/file.ach")
+
+ach_file.header.immediate_destination
+# => "076401251"
+
+ach_file.batches
+|> Enum.flat_map(& &1.entries)
+|> Enum.map(fn {entry, _addenda} -> entry.amount end)
+# => [10000, 5000, ...]
 ```
 
-### Generating ACH Files
+### Generating
 
 ```elixir
 alias BankingStandards.ACH.Generator
 
-Generator.generate("output.ach", [
-  %BatchHeader{company_name: "My Company", service_code: "200"},
-  %EntryDetail{account_number: "12345678", transaction_code: "27", amount: 100000},
-  %BatchTrailer{entry_addenda_count: 1, total_debit: 100000}
-])
+Generator.write(ach_file, "out.ach")
+# or, to get the string:
+contents = Generator.generate(ach_file)
 ```
 
-### Validating ACH Files
+The generator writes trailer and control values verbatim — it does not recompute them. Run `Validator.validate/1` first if values may be inconsistent.
+
+### Validating
 
 ```elixir
 alias BankingStandards.ACH.Validator
 
-{:ok, data} = Validator.validate_file("path/to/file.ach")
-{:ok, data} = Validator.validate_data([
-  %BatchHeader{company_name: "My Company", service_code: "200"},
-  %EntryDetail{account_number: "12345678", transaction_code: "27", amount: 100000}
-])
-```
+case Validator.validate(ach_file) do
+  :ok ->
+    :ok
 
-## Project Structure
+  {:error, errors} ->
+    # errors is a list of human-readable strings, one per rule violation
+    Enum.each(errors, &IO.puts/1)
+end
 
-```plaintext
-BankingStandards/
-├── README.md                # Project overview and usage examples
-├── LICENSE                  # Open source license
-├── .gitignore               # Git ignore rules
-├── mix.exs                  # Elixir project configuration
-├── config/                  # Elixir application configuration
-├── lib/
-│   ├── banking_standards.ex # Main module
-│   ├── ach/                 # NACHA ACH standards
-│   │   ├── parser.ex        # ACH file parser
-│   │   ├── generator.ex     # ACH file generator
-│   │   ├── validator.ex     # ACH file validator
-│   │   ├── examples/        # Example ACH files
-│   │   └── docs/            # ACH documentation and specs
-│   ├── aft/                 # CPA AFT standards
-│   │   ├── parser.ex        # AFT file parser
-│   │   ├── generator.ex     # AFT file generator
-│   │   ├── validator.ex     # AFT file validator
-│   │   ├── examples/        # Example AFT files
-│   │   └── docs/            # AFT documentation and specs
-│   ├── iso20022/            # ISO 20022 standards
-│   │   ├── parser.ex        # ISO 20022 XML parser
-│   │   ├── generator.ex     # ISO 20022 message generator
-│   │   ├── validator.ex     # ISO 20022 validator
-│   │   ├── schemas/         # Predefined XML schemas
-│   │   ├── examples/        # Example ISO 20022 files
-│   │   └── docs/            # ISO 20022 documentation and specs
-│   └── common/              # Shared utilities
-│       ├── file_helper.ex   # File reading and writing utilities
-│       ├── validations.ex   # Common validation functions
-│       ├── format_helper.ex # Helper functions for formatting
-│       └── docs/            # Shared utilities documentation
-├── test/                    # Test suite
-│   ├── ach_test.exs         # Tests for ACH standards
-│   ├── aft_test.exs         # Tests for AFT standards
-│   ├── iso20022_test.exs    # Tests for ISO 20022 standards
-│   └── common_test.exs      # Tests for shared utilities
-└── docs/                    # Project-level documentation
-    ├── architecture.md      # High-level architecture overview
-    ├── CONTRIBUTING.md      # Contribution guidelines
-    ├── FAQ.md               # Frequently asked questions
-    └── ROADMAP.md           # Project roadmap and future features
+Validator.valid_routing_number?("011000015")
+# => true
 ```
 
 ## Contributing
 
-We welcome contributions! Please see the `CONTRIBUTING.md` file in the `docs/` folder for guidelines.
+Issues and PRs welcome. The pre-commit gate is `mix format --check-formatted`, `mix compile --warnings-as-errors`, `mix test`, `mix credo --strict`, `mix ex_dna`, `mix dialyzer`.
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
+MIT. See the `LICENSE` file.
